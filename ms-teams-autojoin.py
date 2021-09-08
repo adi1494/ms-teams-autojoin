@@ -29,7 +29,7 @@ opt.add_experimental_option("prefs", {
     "profile.default_content_setting_values.notifications": 2 
 })
 
-driver = 'chromedriver.exe'
+driver = 'path\\to\\chromedriver.exe'
 URL = "https://teams.microsoft.com"
 CREDS = {'email' : '','passwd':''}
 
