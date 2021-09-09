@@ -8,12 +8,9 @@ from typing import List, Tuple, Union
 
 import config
 import gspread
-import pandas as pd
-import schedule
 from google.oauth2.service_account import Credentials
 from gspread.models import Worksheet
-from tinydb import Query, TinyDB, database
-from tinydb.queries import where
+from tinydb import Query, TinyDB
 from tinydb.table import Document
 
 

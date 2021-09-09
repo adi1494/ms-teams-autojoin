@@ -312,9 +312,10 @@ def main():
     logger = config.logger
     dotenv.load_dotenv()
     
-    refresh_db()
+    if config.REFRESH_DB:
+        refresh_db()
+    
     db = TinyDB(config.DATABASE_PATH)
-
     setup_browser_and_teams()
     alternate_driver_function()
 

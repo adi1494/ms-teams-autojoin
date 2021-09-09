@@ -5,6 +5,8 @@ import coloredlogs
 FILE_LOG_LEVEL = logging.INFO
 CONSOLE_LOG_LEVEL = logging.INFO
 
+REFRESH_DB = False
+
 WEBDRIVER_PATH = Path("./assets/chromedriver")
 DATABASE_PATH = Path("./assets/db.json")
 TIME_TABLE_PATH = Path("./assets/time-table.csv")
@@ -27,13 +29,9 @@ def configure_logging() -> logging.Logger:
     c_handler.setLevel(CONSOLE_LOG_LEVEL)
     f_handler.setLevel(FILE_LOG_LEVEL)
 
-    c_format = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(message)s", datefmt=date_format
-    )
+    c_format = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt=date_format)
 
-    f_format = logging.Formatter(
-        "%(asctime)s - %(levelname)s - %(message)s", datefmt=date_format
-    )
+    f_format = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s", datefmt=date_format)
 
     c_handler.setFormatter(c_format)
     f_handler.setFormatter(f_format)
