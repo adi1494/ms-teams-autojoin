@@ -1,0 +1,3 @@
+delay = 10
+ONE_HOUR = 3600
+HALF_HOUR = 1800
