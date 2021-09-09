@@ -9,6 +9,7 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.support import expected_conditions as EC, wait
+from selenium.webdriver.common.action_chains import ActionChains
 
 
 import re
@@ -34,9 +35,8 @@ URL = "https://teams.microsoft.com"
 CREDS = {'email' : '','passwd':''}
 
 delay = 10
-quarterHour = 1000
-oneHour = 3600
-minClassTime = 1800
+ONE_HOUR = 3600
+HALF_HOUR = 1800
 
 def login():
     print("logging in")
@@ -124,12 +124,12 @@ def timeToWait(classtime):
 def subjectWait(teamname):
     # special wait for each subject
     wait_dict = {
-        'IE': 60,
-        'PPLE': 60,
-        'SC': 240,
-        'NNFS': 240,
-        'DM': 60,
-        'PM': 60,
+        'IE': 300,
+        'PPLE': 30,
+        'SC': 300,
+        'NNFS': 300,
+        'DM': 30,
+        'PM': 30,
     }
     k = wait_dict.get(teamname)
     print('sleeping for '+str(k)+' seconds for '+teamname+' class')
@@ -157,29 +157,37 @@ def micOff():
     time.sleep(1)
     return
 
+def check_for_attendees():
+    elements = browser.find_elements_by_css_selector('span.toggle-number')
+    # print(elements)
+    return elements
+
 # needs work
 def leaveCondition(classtime):
-    elements = browser.find_elements_by_css_selector('span.toggle-number')
-    # cant update maxnumber
-    maxnumber = 0
-    for i in elements:
-        string = i.get_attribute('innerHTML')
-        number = int(string[1:-1])
-        print(string)
-        if number > maxnumber:
-            maxnumber = number
-    # string = browser.find_element_by_css_selector('span.toggle-number').get_attribute('innerHTML')
-    # number = int(string[1:len(string)-1])
-    print('this is the maxnumber '+str(maxnumber))
+    participants_button = browser.find_element_by_css_selector('button#roster-button')
+    hover = ActionChains(browser).move_to_element(participants_button)
+    hover.perform()
+    participants_button.click()
+
     while 1:
-        # later have to change this or to and
-        # use 'and' assuming the maxnumber is updated correctly, otherwise us 'or' -> exits meeting after one hour
-        # if maxnumber > 20 and timeDiff(classtime) < 3600:
-        if maxnumber > 20 or timeDiff(classtime) < oneHour:
-            time.sleep(2)
-            print('participants = '+str(maxnumber))
+        elements = check_for_attendees()
+        maxnumber = 0
+        for i in elements:
+            string = i.get_attribute('innerHTML')
+            # print(string)
+            number = int(string[1:-1])
+            if number > maxnumber:
+                maxnumber = number
+        string = browser.find_element_by_css_selector('span.toggle-number').get_attribute('innerHTML')
+        number = int(string[1:len(string)-1])
+        # print('this is the maxnumber '+str(maxnumber))
+
+        if maxnumber > 20 and timeDiff(classtime) < ONE_HOUR:
+            print('conditions not met, participants = '+str(maxnumber))
+            print('sleeping for 30 seconds')
+            time.sleep(30)
         else:
-            print('participants = '+str(maxnumber))
+            print('conditions met, participants = '+str(maxnumber)+' leaving')
             return True
     return True
 
@@ -190,7 +198,8 @@ def leave(teamname):
     print('left '+teamname+' meeting')
 
 def leaveMeeting(teamname, classtime):
-    time.sleep(minClassTime)
+    print('sleeping for 30 mins')
+    time.sleep(HALF_HOUR)
     try:
         element = browser.find_element_by_css_selector('svg.app-svg.icons-call-end')
         print('in meeting')
@@ -240,7 +249,7 @@ def joinClass(teamname, classtime):
     print('joined last channel')
     # search if active meeting
     try:
-        myElem = WebDriverWait(browser, quarterHour).until(EC.presence_of_element_located((By.CLASS_NAME, 'ts-calling-join-button')))
+        myElem = WebDriverWait(browser, HALF_HOUR).until(EC.presence_of_element_located((By.CLASS_NAME, 'ts-calling-join-button')))
         subjectWait(teamname)
         joinMeeting(teamname, classtime)
     except TimeoutException:
@@ -315,7 +324,7 @@ def mainFunc():
             # calculate classtime to wait
             ttw = timeToWait(classtime)+10
             # 10 sec extra just to be sure :3
-            if ttw == 0 and timeDiff(classtime) > oneHour:
+            if ttw == 0 and timeDiff(classtime) > ONE_HOUR:
                 print(teamname+' class over')
             else:    
                 # wait for that long
