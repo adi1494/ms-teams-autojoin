@@ -1,354 +1,338 @@
+from logging import log
 import time
-import datetime
-import csv
+import dotenv
+import datetime as dt
+from pprint import pprint
+from typing import List, Union
 
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome import options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
-from selenium.common.exceptions import NoSuchElementException, TimeoutException
-from selenium.webdriver.support import expected_conditions as EC, wait
+from selenium.webdriver.remote.webelement import WebElement
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
+
+from tinydb import Query, TinyDB, utils
+from tinydb.queries import where
+from tinydb.table import Document
+
+import config
+from modules import util
 
 
-import re
-from os import path
+from modules.db_ops import (
+    Class_,
+    refresh_db,
+)
 
-# webdriver options
-opt = Options()
-opt.add_argument("--disable-infobars")
-opt.add_argument("start-maximized")
-opt.add_argument("--disable-extensions")
-opt.add_argument("--start-maximized")
+from modules.util import (
+    get_time_difference,
+    get_day,
+    get_todays_timetable,
+    get_time_to_wait,
+)
 
-# pass argument 1 to allow and 2 to block
-opt.add_experimental_option("prefs", {
-    "profile.default_content_setting_values.media_stream_mic": 1, 
-    "profile.default_content_setting_values.media_stream_camera": 1,
-    "profile.default_content_setting_values.geolocation": 2, 
-    "profile.default_content_setting_values.notifications": 2 
-})
 
-driver = 'path\\to\\chromedriver.exe'
-URL = "https://teams.microsoft.com"
-CREDS = {'email' : '','passwd':''}
+def leave_meeting(team_name: str, class_time: str) -> None:
+    # logger.info("sleeping for 30 mins")
+    # time.sleep(config.HALF_HOUR)
 
-delay = 10
-ONE_HOUR = 3600
-HALF_HOUR = 1800
+    logger.info("sleeping for 10 secs")
+    time.sleep(10)
 
-def login():
-    print("logging in")
+    def leave() -> None:
+        """leave the current meeting"""
+        try:
+            browser.find_element_by_css_selector("button#app-bar-2a84919f-59d8-4441-a975-2a8c2643b741").click()
+            time.sleep(1)
+            browser.find_element_by_css_selector("button#hangup-button").click()
+            logger.info(f"left {team_name} meeting")
+        
+        except Exception as e:
+            logger.debug(f"this should not have happened...")
+            logger.error(f"some exception raised while trying to leave meeting:\n{e}")    
+        
+    # TODO needs work
+    def leave_on_condition() -> None:
+        participants_button = browser.find_element_by_css_selector("button#roster-button")
+        hover = ActionChains(browser).move_to_element(participants_button)
+        hover.perform()
+        participants_button.click()
 
-    time.sleep(1)
-    emailField = browser.find_element_by_xpath('//*[@id="i0116"]')
-    emailField.click()
-    emailField.send_keys(CREDS['email'])
-    browser.find_element_by_xpath('//*[@id="idSIButton9"]').click() # next button
+        def check_for_attendees() -> List[WebElement]:
+            """get attendee number elements"""
+            elements = browser.find_elements_by_css_selector("span.toggle-number")
+            return elements
 
-    time.sleep(2)
-    passwordField = browser.find_element_by_xpath('//*[@id="i0118"]')
-    passwordField.click()
-    passwordField.send_keys(CREDS['passwd'])
-    browser.find_element_by_xpath('//*[@id="idSIButton9"]').click() # sign in button
-    
-    time.sleep(2)
-    browser.find_element_by_xpath('//*[@id="idSIButton9"]').click() #remember login
-    
-    time.sleep(5)
-    if findSkipButton():
-        skipbutton = browser.find_element_by_link_text('Use the web app instead').click()
-        skipbutton.click()
-        time.sleep(5)
+        def attendee_elem_to_num(element: WebElement) -> int:
+            """ helper function to enable sorting/max of attendee_element list """
+            str_num = element.get_attribute("innerHTML")[1:-1]
+            return int(str_num)
 
-def findSkipButton():
+        while True:
+            elements = check_for_attendees()
+            max_num = max(elements, key=attendee_elem_to_num)
+            max_num = attendee_elem_to_num(max_num)
+
+            if max_num > 20 and get_time_difference(class_time) < config.ONE_HOUR:
+                logger.info(f"conditions not met, participants: {max_num}")
+                logger.info("sleeping for 30s")
+                time.sleep(30)
+
+            else:
+                logger.info(f"conditions met, participants: {max_num}, Leaving...")
+                leave()
+
     try:
-        browser.find_element_by_link_text('use the web app instead')
+        _ = browser.find_element_by_css_selector("svg.app-svg.icons-call-end")
+        logger.info(f"in meeting {team_name}")
+
     except NoSuchElementException:
-        return False
-    return True
+        logger.info(f"meeting {team_name} already left")
+        return
 
-def homePage():
-    browser.get(URL)
-    try:
-        myElem = WebDriverWait(browser, delay).until(EC.presence_of_element_located((By.ID, 'idSIButton9')))
-        print("email page ready")
-        login()
-    except TimeoutException:
-        print("email page took too long")
+    else:  # no exception raised, button found
+        leave_on_condition()
 
-def startBrowser():
-    global browser
-    browser = webdriver.Chrome(chrome_options=opt, executable_path=driver)
-    homePage()
 
-def getDay():
-    # returns row number in csv
-    return datetime.date.today().isoweekday()
+def join_class(team_name: str, class_time: str) -> None:
+    def wait_for_team(team_name) -> None:
+        """custom wait times for each subject"""
+        wait_dict = {
+            "IE": 300,
+            "PPLE": 30,
+            "SC": 300,
+            "NNFS": 300,
+            "DM": 30,
+            "PM": 30,
+        }
+        # time_to_wait = wait_dict.get(team_name)
+        time_to_wait = 0
+        logger.info(f"sleeping for {time_to_wait} seconds for {team_name} class")
+        time.sleep(time_to_wait)
 
-def getTodaysTimeTable(dayidx):
-    with open('time-table.csv', mode='r') as myfile:
-        reader = csv.reader(myfile)
-        timelist = next(reader)
-        timelist.pop(0)
-        # print(timelist)
-        sublist = []
-        while dayidx > 0:
-            sublist = next(reader)
-            dayidx = dayidx-1
-        sublist.pop(0)
-        # print(sublist)
-        today = dict(zip(sublist, timelist))
-        # print(today)
-        return today
+    def get_proper_channel() -> WebElement:
+        # TODO: Update channel fetch logic to get most appropriate channel, instead of last
+        channel_list = browser.find_elements_by_class_name("name-channel-type")
+        return channel_list[-1]
 
-def timeDiff(classtime):
-    temptime = datetime.datetime.strptime(classtime, '%H:%M')
-    now = datetime.datetime.now()
-    jointime = datetime.datetime(now.year, now.month, now.day, temptime.hour, temptime.minute, temptime.second)
-    k = now - jointime
-    return k.seconds
-
-def timeToWait(classtime):
-    temptime = datetime.datetime.strptime(classtime, '%H:%M')
-    now = datetime.datetime.now()
-    jointime = datetime.datetime(now.year, now.month, now.day, temptime.hour, temptime.minute, temptime.second)
-    k = now - jointime
-    if (k.days < 0):
-        t = jointime - now
-        return t.seconds
-    else:
-        return 0
-
-def subjectWait(teamname):
-    # special wait for each subject
-    wait_dict = {
-        'IE': 300,
-        'PPLE': 30,
-        'SC': 300,
-        'NNFS': 300,
-        'DM': 30,
-        'PM': 30,
-    }
-    k = wait_dict.get(teamname)
-    print('sleeping for '+str(k)+' seconds for '+teamname+' class')
-    time.sleep(k)
-
-def webcamOff():
-    try:
-        webcam = browser.find_element_by_css_selector('span[title="Turn camera off"]')
-        webcam.click()
-        print('turned off webcam')
-    except NoSuchElementException:
-        print('webcam already off')
-        pass
-    time.sleep(1)
-    return
-
-def micOff():
-    try:
-        mic = browser.find_element_by_css_selector('span[title="Mute microphone"]')
-        mic.click()
-        print('turned off micphone')
-    except NoSuchElementException:
-        print('microphone already off')
-        pass
-    time.sleep(1)
-    return
-
-def check_for_attendees():
-    elements = browser.find_elements_by_css_selector('span.toggle-number')
-    # print(elements)
-    return elements
-
-# needs work
-def leaveCondition(classtime):
-    participants_button = browser.find_element_by_css_selector('button#roster-button')
-    hover = ActionChains(browser).move_to_element(participants_button)
-    hover.perform()
-    participants_button.click()
-
-    while 1:
-        elements = check_for_attendees()
-        maxnumber = 0
-        for i in elements:
-            string = i.get_attribute('innerHTML')
-            # print(string)
-            number = int(string[1:-1])
-            if number > maxnumber:
-                maxnumber = number
-        string = browser.find_element_by_css_selector('span.toggle-number').get_attribute('innerHTML')
-        number = int(string[1:len(string)-1])
-        # print('this is the maxnumber '+str(maxnumber))
-
-        if maxnumber > 20 and timeDiff(classtime) < ONE_HOUR:
-            print('conditions not met, participants = '+str(maxnumber))
-            print('sleeping for 30 seconds')
-            time.sleep(30)
-        else:
-            print('conditions met, participants = '+str(maxnumber)+' leaving')
+    def join_meeting(iteration=1) -> bool:
+        """try to join meeting if button appears, for 30 iterations (30 seconds sleep). Returns status."""
+        nonlocal team_name
+        logger.info(f"Trying to join meeting ({team_name}). Iteration-{iteration}")
+        try:
+            join_button = browser.find_element_by_xpath('//*[@id="m1631198950197"]/calling-join-button/button')
+            # join_button = browser.find_element_by_css_selector("button[title='Join call with video']")
+            join_button.click()
+            logger.info("Clicked on Join Button")
             return True
-    return True
 
-def leave(teamname):
-    browser.find_element_by_css_selector('button#app-bar-2a84919f-59d8-4441-a975-2a8c2643b741').click()
-    time.sleep(1)
-    browser.find_element_by_css_selector('button#hangup-button').click()
-    print('left '+teamname+' meeting')
+        except NoSuchElementException:
+            if iteration < 30:
+                logger.info(f"Join button not found. Trying again in 30 secs")
+                time.sleep(30)
+                browser.refresh()
+                join_meeting(iteration + 1)
 
-def leaveMeeting(teamname, classtime):
-    print('sleeping for 30 mins')
-    time.sleep(HALF_HOUR)
+            else:  # exceeded number of allowed iterations
+                logger.info(f"No join button for {team_name} found after 30 iterations")
+                return False
+
+    get_proper_channel().click()
+    logger.info(f"Entered apt channel in {team_name} team")
+
     try:
-        element = browser.find_element_by_css_selector('svg.app-svg.icons-call-end')
-        print('in meeting')
-    except NoSuchElementException:
-        print('already left meeting')
-        return
-    
-    if leaveCondition(classtime):
-        leave(teamname)
-
-def joinMeeting(teamname, classtime):
-    print('trying to join meeting')
-    try:
-        joinbtn = browser.find_element_by_css_selector("button[title='Join call with video']")
-        joinbtn.click()
-        print('clicked on join button')
-    except NoSuchElementException:
-        i = 1
-        # loop runs for 15 mins
-        # tries to join meeting for 30 mins else returns
-        while i < 30:
-            print('join button not found, trying again')
-            time.sleep(30)
-            browser.refresh()
-            joinMeeting(teamname, classtime)
-            i += 1
-        print('no'+teamname+'class today')
-        return
-    
-    # turn off camera and mic
-    time.sleep(3)
-    webcamOff()
-    micOff()
-
-    print('joining '+teamname+' meeting')
-    joinNowBtn = browser.find_element_by_css_selector("button[data-tid='prejoin-join-button']")
-    joinNowBtn.click()
-
-    # check if conditions met for leaving
-    # if yes leaveClass() if not wait
-    # handled by leaveMeeting()
-    leaveMeeting(teamname, classtime)
-
-def joinClass(teamname, classtime):
-    channelList = browser.find_elements_by_class_name('name-channel-type')
-    channelList[-1].click()
-    print('joined last channel')
-    # search if active meeting
-    try:
-        myElem = WebDriverWait(browser, HALF_HOUR).until(EC.presence_of_element_located((By.CLASS_NAME, 'ts-calling-join-button')))
-        subjectWait(teamname)
-        joinMeeting(teamname, classtime)
+        # check if active meeting
+        _ = WebDriverWait(browser, config.HALF_HOUR).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "ts-calling-join-button"))
+        )
+        wait_for_team(team_name)
+        meeting_button_status = join_meeting()
+        
     except TimeoutException:
-        print('could not join '+teamname+' class')
-    # join the meeting 3 mins after start time
-    # leave the meeting after time or participants < 20
+        logger.critical(f"Could not join {team_name} class due to Timeout Error")
 
-def joinTeam(teamname, classtime):
-    # the team name dictionary
+    else:
+        if meeting_button_status:  # check if join button clicked is True
+            time.sleep(3)
+            util.turn_off_camera(browser)
+            util.turn_off_mic(browser)
+
+            join_now_button = browser.find_element_by_css_selector(
+                "button[data-tid='prejoin-join-button']"
+            )
+            logger.info(f"Joining {team_name} meeting")
+            join_now_button.click()
+
+            # check if conditions met for leaving if yes leaveClass() if not wait. handled by leave_meeting()
+            leave_meeting(team_name, class_time)
+
+
+def join_team(team_name: str, class_time: str):
     class_dict = {
-        'IE': 'industrial',
-        'PPLE': 'mt130',
-        'SC':'ec419',
-        'NNFS':'fuzzy',
-        'DM':'ce429',
-        'PM':'pe309'
+        "IE": "industrial",
+        "PPLE": "mt130",
+        "SC": "ec419",
+        "NNFS": "fuzzy",
+        "DM": "ce429",
+        "PM": "pe309",
     }
-    # find team name
-    team_name = class_dict.get(teamname)
-    # open correct team
+
+    team_keyword = class_dict.get(team_name).lower()
     teams_available = browser.find_elements_by_css_selector("h1.team-name-text")
-    for i in teams_available:
-        team_name_super = i.get_attribute('innerHTML').lower()
-        if team_name.lower() in team_name_super:
-            i.click()
+
+    for item in teams_available:
+        team_full_name = item.get_attribute("innerHTML").lower()
+        if team_keyword in team_full_name:  # found keyword in list of teams
+            item.click()
             break
 
-    # check if team opened
-    try:
-        myElem = WebDriverWait(browser, delay).until(EC.presence_of_element_located((By.ID, 'new-post-button')))
-        print(teamname+" team successfully opened")
-        joinClass(teamname, classtime)
-        # go back to homepage
-        backButton = browser.find_element_by_css_selector('svg.app-svg.icons-chevron-left.icons-rtl-flip')
-        backButton.click()
-        print('closed '+teamname+' team, back to home screen')
+    try:  # check if team opened
+        _ = WebDriverWait(browser, config.DELAY).until(
+            EC.presence_of_element_located((By.ID, "new-post-button"))
+        )
+        logger.info(f"{team_name} ({team_keyword}) successfully opened")
+        join_class(team_name, class_time)
+
+        back_button = browser.find_element_by_css_selector(
+            "svg.app-svg.icons-chevron-left.icons-rtl-flip"
+        )
+        logger.info(f"closed {team_name} team, going back to home screen")
+        back_button.click()
+
     except TimeoutException:
-        print("couldnt open "+teamname+" team")
+        logger.error(f"Could not open {team_name} team's main page due to timeout")
         return
 
-def gridView():
-    optionsButton = browser.find_element_by_css_selector("svg.app-svg.icons-settings")
-    optionsButton.click()
 
-    parentUL = browser.find_element_by_css_selector("ul.app-default-menu-ul")
-    optionsList = parentUL.find_elements_by_tag_name("li")
-    optionsList[1].click() # crude method
-
-    gridLayoutSelector = browser.find_element_by_css_selector('li[data-tid="grid-layout"]')
-    gridLayoutSelector.click()
-
-    closeButton = browser.find_element_by_css_selector('div.close-container.app-icons-fill-hover')
-    closeButton.click()
-
-def mainFunc():
+def driver_function():
     # get todays day
-    day = getDay()
-    print('today\'s index is :', day)
+    day = get_day()
+    logger.info(f"Today's Day Index is :{day}")
 
     # get todays timetable
-    classestoday = getTodaysTimeTable(day)
-    classestoday.pop('0')
-    # print(classestoday)
+    classes_today = get_todays_timetable(day)
+    classes_today.pop("0")
 
-    # iterate through todays timetable
-    # if entry is not 0 wait till join
-    for it in classestoday.items():
-        teamname = it[0]
-        classtime = it[1]
-        if teamname != '0':
-            print('waiting for '+teamname+' class at '+classtime)
-            # calculate classtime to wait
-            ttw = timeToWait(classtime)+10
-            # 10 sec extra just to be sure :3
-            if ttw == 0 and timeDiff(classtime) > ONE_HOUR:
-                print(teamname+' class over')
-            else:    
+    pprint(classes_today)
+
+    # iterate through todays timetable, if entry is not 0 wait till join
+    for team_name, class_time in classes_today.items():
+        if team_name != "0":
+            logger.info(f"waiting for {team_name} class at {class_time}")
+
+            # calculate class_time to wait
+            if ttw == 0 and get_time_difference(class_time) > config.ONE_HOUR:
+                logger.info(f"{team_name} class is over")
+
+            else:
                 # wait for that long
-                print('sleeping for '+str(ttw)+' seconds')
+                logger.info(f"sleeping for {ttw} seconds")
                 time.sleep(ttw)
-                joinTeam(teamname, classtime)
+                join_team(team_name, class_time)
+
         else:
-            print('no class this hour')
+            logger.info("No Class in this Hour")
             # iterates to next element
+
     # when todays routine exhausted
-    print('all done for today')
+    logger.info("All Done for Today")
     exit()
 
-# driver section
-startBrowser()
 
-# wait till page loaded
-# find element by id 'control-input'
-try:
-    myElem = WebDriverWait(browser, delay).until(EC.presence_of_element_located((By.ID, 'control-input')))
-    print("home page ready")
-    gridView() # grid view
-    mainFunc()
-except TimeoutException:
-    print("home page took too long, retrying")
-    browser.close()
-    startBrowser()
+def alternate_driver_function():
+    global db
+    day_today_str = dt.datetime.now().strftime("%a")
+
+    Table = Query()
+    classes_today = db.search(Table.day_name == day_today_str)
+    class_list = sorted([Class_(dict(class_doc)) for class_doc in classes_today])
+
+    def get_time_to_wait(time: str) -> Union[int, None]:
+        """time (seconds) to wait to get to time in parameter"""
+        time_now = dt.datetime.now()
+
+        target_time_object = dt.datetime.strptime(time, "%H:%M").replace(
+            year=time_now.year, month=time_now.month, day=time_now.day
+        )
+
+        if time_now > target_time_object:
+            return None
+
+        return (target_time_object - time_now).seconds
+
+    def get_time_diff(time: str) -> int:
+        time_now = dt.datetime.now()
+
+        target_time_object = dt.datetime.strptime(time, "%H:%M").replace(
+            year=time_now.year, month=time_now.month, day=time_now.day
+        )
+        
+        return abs(time_now - target_time_object).seconds
+    
+    
+    for class_obj in class_list:
+        logger.info(f"trying to join {class_obj.name} at {class_obj.start_time}")
+        time_to_wait = get_time_to_wait(class_obj.start_time)
+
+        if time_to_wait is None and get_time_diff(class_obj.start_time) > config.ONE_HOUR:
+            logger.info(f"class {class_obj.name} is over, i guess")
+
+        else:  # can wait for that time,  join class
+            if time_to_wait is None:
+                time_to_wait = 0
+            
+            time_to_wait += 10  # extra 10 seconds
+            logger.info(f"sleeping for {time_to_wait}s.")
+            time.sleep(time_to_wait)
+            logger.info(f"trying to join class {class_obj.name}")
+            join_team(class_obj.name, class_obj.start_time)
+
+    logger.info(f"exhausted list of classes for the day. Exiting...")
+    exit()
+
+
+def setup_browser_and_teams(iteration=1):
+    global browser
+    try:
+        browser = util.start_browser()
+        util.fetch_teams_homepage(browser)
+        util.login(browser)
+
+        try:
+            _ = WebDriverWait(browser, config.DELAY).until(
+                EC.presence_of_element_located((By.ID, "control-input"))
+            )
+            logger.info("home page is ready")
+            util.open_grid_view(browser)
+            return
+
+        except TimeoutException:
+            if iteration < 2:
+                logger.info(f"loading homepage took too long, retrying ({iteration})...")
+                setup_browser_and_teams(iteration + 1)
+
+            else:
+                logger.critical(f"exhausted number of allowed iterations for loading homepage")
+
+    except Exception as e:
+        # TODO: Use proper exception instead of generic exception
+        logger.error(f"Error occured during browser setup\n{e}")
+
+
+def main():
+    global db
+    global logger
+    logger = config.logger
+    dotenv.load_dotenv()
+    
+    if config.REFRESH_DB:
+        refresh_db()
+    
+    db = TinyDB(config.DATABASE_PATH)
+    setup_browser_and_teams()
+    alternate_driver_function()
+
+
+if __name__ == "__main__":
+    main()
