@@ -1,4 +1,6 @@
-from logging import log
+import json
+import logging
+import coloredlogs
 import time
 import dotenv
 import datetime as dt
@@ -18,12 +20,7 @@ from tinydb.table import Document
 
 import config
 from modules import util
-
-
-from modules.db_ops import (
-    Class_,
-    refresh_db,
-)
+from modules import db_ops
 
 from modules.util import (
     get_time_difference,
@@ -32,26 +29,56 @@ from modules.util import (
     get_time_to_wait,
 )
 
+logger = logging.getLogger("teams-joiner")
+
 
 def leave_meeting(team_name: str, class_time: str) -> None:
-    # logger.info("sleeping for 30 mins")
-    # time.sleep(config.HALF_HOUR)
-
-    logger.info("sleeping for 10 secs")
-    time.sleep(10)
-
+    
+    joined_time = dt.datetime.now()
+    logger.info(f"{team_name} joined at {joined_time.strftime('%H:%M')}")
+    
+    def get_optimal_wait_time() -> int:
+        """get time to wait from time joined."""
+        nonlocal joined_time
+        now = joined_time
+        time_to_wait = 0
+        
+        to_time_object = lambda time_str: dt.datetime.strptime(time_str, "%H:%M").replace(
+            now.year, now.month, now.day
+        )
+        
+        start_time = to_time_object(class_time)
+        end_time = start_time + dt.timedelta(hours = 1)
+        
+        logger.info(f"{team_name} ")
+        
+        # Table = Query()
+        # day_today_str = now.strftime("%a")
+        # search_result = db.search(Table.day_name == day_today_str & Table.start_time == class_time)
+        # end_time = to_time_object(search_result[0].get("end_time"))
+        
+        time_difference = (end_time - now)
+        time_to_wait = time_difference.seconds
+        
+        if time_difference.seconds > 60:
+            time_to_wait -= 30
+        
+        return time_to_wait
+        
     def leave() -> None:
         """leave the current meeting"""
         try:
-            browser.find_element_by_css_selector("button#app-bar-2a84919f-59d8-4441-a975-2a8c2643b741").click()
+            browser.find_element_by_css_selector(
+                "button#app-bar-2a84919f-59d8-4441-a975-2a8c2643b741"
+            ).click()
             time.sleep(1)
             browser.find_element_by_css_selector("button#hangup-button").click()
             logger.info(f"left {team_name} meeting")
-        
+
         except Exception as e:
             logger.debug(f"this should not have happened...")
-            logger.error(f"some exception raised while trying to leave meeting:\n{e}")    
-        
+            logger.error(f"some exception raised while trying to leave meeting:\n{e}")
+
     # TODO needs work
     def leave_on_condition() -> None:
         participants_button = browser.find_element_by_css_selector("button#roster-button")
@@ -65,7 +92,7 @@ def leave_meeting(team_name: str, class_time: str) -> None:
             return elements
 
         def attendee_elem_to_num(element: WebElement) -> int:
-            """ helper function to enable sorting/max of attendee_element list """
+            """helper function to enable sorting/max of attendee_element list"""
             str_num = element.get_attribute("innerHTML")[1:-1]
             return int(str_num)
 
@@ -83,6 +110,11 @@ def leave_meeting(team_name: str, class_time: str) -> None:
                 logger.info(f"conditions met, participants: {max_num}, Leaving...")
                 leave()
 
+    time_to_wait = get_optimal_wait_time()
+    logging.info(f"sleeping for {time_to_wait}s")
+    time.sleep(time_to_wait)
+    
+    logging.info(f"now, will start workflow to leave {team_name}")
     try:
         _ = browser.find_element_by_css_selector("svg.app-svg.icons-call-end")
         logger.info(f"in meeting {team_name}")
@@ -96,18 +128,12 @@ def leave_meeting(team_name: str, class_time: str) -> None:
 
 
 def join_class(team_name: str, class_time: str) -> None:
+    """join class with given team_name"""
+
     def wait_for_team(team_name) -> None:
         """custom wait times for each subject"""
-        wait_dict = {
-            "IE": 300,
-            "PPLE": 30,
-            "SC": 300,
-            "NNFS": 300,
-            "DM": 30,
-            "PM": 30,
-        }
-        # time_to_wait = wait_dict.get(team_name)
-        time_to_wait = 0
+        global class_metadata
+        time_to_wait = class_metadata.get(team_name)["Wait"]
         logger.info(f"sleeping for {time_to_wait} seconds for {team_name} class")
         time.sleep(time_to_wait)
 
@@ -121,7 +147,9 @@ def join_class(team_name: str, class_time: str) -> None:
         nonlocal team_name
         logger.info(f"Trying to join meeting ({team_name}). Iteration-{iteration}")
         try:
-            join_button = browser.find_element_by_xpath('//*[@id="m1631198950197"]/calling-join-button/button')
+            join_button = browser.find_element_by_xpath(
+                '//*[@id="m1631198950197"]/calling-join-button/button'
+            )
             # join_button = browser.find_element_by_css_selector("button[title='Join call with video']")
             join_button.click()
             logger.info("Clicked on Join Button")
@@ -148,7 +176,7 @@ def join_class(team_name: str, class_time: str) -> None:
         )
         wait_for_team(team_name)
         meeting_button_status = join_meeting()
-        
+
     except TimeoutException:
         logger.critical(f"Could not join {team_name} class due to Timeout Error")
 
@@ -169,16 +197,8 @@ def join_class(team_name: str, class_time: str) -> None:
 
 
 def join_team(team_name: str, class_time: str):
-    class_dict = {
-        "IE": "industrial",
-        "PPLE": "mt130",
-        "SC": "ec419",
-        "NNFS": "fuzzy",
-        "DM": "ce429",
-        "PM": "pe309",
-    }
-
-    team_keyword = class_dict.get(team_name).lower()
+    global team_keyword
+    team_keyword = class_metadata.get(team_name)["Keyword"].lower()
     teams_available = browser.find_elements_by_css_selector("h1.team-name-text")
 
     for item in teams_available:
@@ -205,48 +225,13 @@ def join_team(team_name: str, class_time: str):
         return
 
 
-def driver_function():
-    # get todays day
-    day = get_day()
-    logger.info(f"Today's Day Index is :{day}")
-
-    # get todays timetable
-    classes_today = get_todays_timetable(day)
-    classes_today.pop("0")
-
-    pprint(classes_today)
-
-    # iterate through todays timetable, if entry is not 0 wait till join
-    for team_name, class_time in classes_today.items():
-        if team_name != "0":
-            logger.info(f"waiting for {team_name} class at {class_time}")
-            ttw = get_time_to_wait(class_time)
-            # calculate class_time to wait
-            if ttw == 0 and get_time_difference(class_time) > config.ONE_HOUR:
-                logger.info(f"{team_name} class is over")
-
-            else:
-                # wait for that long
-                logger.info(f"sleeping for {ttw} seconds")
-                time.sleep(ttw)
-                join_team(team_name, class_time)
-
-        else:
-            logger.info("No Class in this Hour")
-            # iterates to next element
-
-    # when todays routine exhausted
-    logger.info("All Done for Today")
-    exit()
-
-
 def alternate_driver_function():
     global db
     day_today_str = dt.datetime.now().strftime("%a")
 
     Table = Query()
     classes_today = db.search(Table.day_name == day_today_str)
-    class_list = sorted([Class_(dict(class_doc)) for class_doc in classes_today])
+    class_list = sorted([db_ops.Class_(dict(class_doc)) for class_doc in classes_today])
 
     def get_time_to_wait(time: str) -> Union[int, None]:
         """time (seconds) to wait to get to time in parameter"""
@@ -267,28 +252,28 @@ def alternate_driver_function():
         target_time_object = dt.datetime.strptime(time, "%H:%M").replace(
             year=time_now.year, month=time_now.month, day=time_now.day
         )
-        
+
         return abs(time_now - target_time_object).seconds
-    
-    
-    for class_obj in class_list:
-        logger.info(f"trying to join {class_obj.name} at {class_obj.start_time}")
-        time_to_wait = get_time_to_wait(class_obj.start_time)
 
-        if time_to_wait is None and get_time_diff(class_obj.start_time) > config.ONE_HOUR:
-            logger.info(f"class {class_obj.name} is over, i guess")
+    for class_ in class_list:
+        logger.info(f"trying to join {class_.name} at {class_.start_time}")
+        time_to_wait = get_time_to_wait(class_.start_time)
 
-        else:  # can wait for that time,  join class
+        if time_to_wait is None and (get_time_diff(class_.start_time) > config.ONE_HOUR):
+            logger.info(f"class {class_.name} is over, i guess")
+
+        else:  # can wait for that time, join class
             if time_to_wait is None:
                 time_to_wait = 0
-            
+
             time_to_wait += 10  # extra 10 seconds
             logger.info(f"sleeping for {time_to_wait}s.")
             time.sleep(time_to_wait)
-            logger.info(f"trying to join class {class_obj.name}")
-            join_team(class_obj.name, class_obj.start_time)
+            logger.info(f"trying to join class {class_.name}")
+            join_team(class_.name, class_.start_time)
 
     logger.info(f"exhausted list of classes for the day. Exiting...")
+    browser.quit()
     exit()
 
 
@@ -320,16 +305,49 @@ def setup_browser_and_teams(iteration=1):
         logger.error(f"Error occured during browser setup\n{e}")
 
 
+def configure_logging():
+    global logger
+    date_format = "%d-%b-%y %H:%M:%S"
+    c_handler = logging.StreamHandler()
+    f_handler = logging.FileHandler("./logs/file.log", mode="a")
+    c_handler.setLevel(config.CONSOLE_LOG_LEVEL)
+    f_handler.setLevel(config.FILE_LOG_LEVEL)
+    c_format = logging.Formatter(
+        "%(asctime)s - %(levelname)s - [%(module)s] - %(message)s", datefmt=date_format
+    )
+    f_format = logging.Formatter(
+        "%(asctime)s - %(levelname)s - [%(module)s] - %(message)s", datefmt=date_format
+    )
+
+    c_handler.setFormatter(c_format)
+    f_handler.setFormatter(f_format)
+
+    logger.addHandler(f_handler)
+    coloredlogs.install(
+        logger=logger,
+        fmt="%(asctime)s - %(levelname)s - [%(module)s] - %(message)s",
+        datefmt=date_format,
+    )
+
+
 def main():
     global db
     global logger
-    logger = config.logger
+    global class_metadata
+
     dotenv.load_dotenv()
-    
+    configure_logging()
+
     if config.REFRESH_DB:
-        refresh_db()
-    
+        db_ops.refresh_db()
+
+    if config.REFRESH_META:
+        db_ops.create_metadata_json()
+
     db = TinyDB(config.DATABASE_PATH)
+    with open(config.CLASS_METADATA_PATH, "r") as file:
+        class_metadata = json.load(file)
+
     setup_browser_and_teams()
     alternate_driver_function()
 
