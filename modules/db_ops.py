@@ -3,8 +3,10 @@ import json
 import logging
 import os
 import time
-from pprint import pprint
+from pprint import pp, pprint
 from typing import List, Tuple, Union
+
+from gspread import client
 
 import config
 import gspread
@@ -13,6 +15,7 @@ from gspread.models import Worksheet
 from tinydb import Query, TinyDB
 from tinydb.table import Document
 
+logger = logging.getLogger('teams-joiner')
 
 class Class_:
     def __init__(self, args) -> None:
@@ -70,7 +73,7 @@ class ClassPeriod:
 
 
 def authorize_gspread() -> gspread.Client:
-    logger = config.logger
+    # logger = config.logger
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -82,15 +85,16 @@ def authorize_gspread() -> gspread.Client:
     return client
 
 
-def get_worksheet(client: gspread.Client):
+def get_worksheet(client: gspread.Client, worksheet_name: str):
     sheet_key = os.environ.get("SPREADSHEET_KEY")
     google_sheet = client.open_by_key(sheet_key)
-    worksheet = google_sheet.worksheet("Sheet4")
+    worksheet = google_sheet.worksheet(worksheet_name)
     return worksheet
 
 
 def parse_json_timetable(time_table_data: List[dict]) -> List[ClassPeriod]:
     """Parses JSON timetable"""
+    # logger = config.logger()
     data = time_table_data
     time_table_list = []
 
@@ -100,14 +104,14 @@ def parse_json_timetable(time_table_data: List[dict]) -> List[ClassPeriod]:
         del day_classes["Day"]
 
         for start_time, class_name in day_classes.items():
-            if str(class_name) != "0":
+            if str(class_name) != "":
 
                 entry = ClassPeriod(class_name, start_time, day_name)
                 if previous:
                     # TODO: Implement code for merging classes with > 1 hour slots found in JSON
                     if entry.is_following(previous):
                         # do something with duration
-                        print("following detected")
+                        logger.debug(f"following detected {previous}")
                         pass
 
                 time_table_list.append(entry)
@@ -133,12 +137,12 @@ def create_db(time_table_list: List[ClassPeriod]) -> None:
 
 
 def refresh_db() -> None:
-    logger = config.logger
+    # logger = config.logger
     try:
         google_client = authorize_gspread()
         logger.info("authorized google client")
 
-        worksheet = get_worksheet(google_client)
+        worksheet = get_worksheet(google_client, "Time Table")
         worksheet_data = worksheet.get_all_records()
         time_table = parse_json_timetable(worksheet_data)
         logger.debug("worksheet parsed into `ClassPeriod` object")
@@ -150,5 +154,26 @@ def refresh_db() -> None:
         logger.error(f"error occured in refreshing database\n{e}")
 
 
+def create_metadata_json() -> None:
+    client = authorize_gspread()
+    logger.info(f"loading data from Meta sheet")
+
+    def get_metadata_from_sheet(client: gspread.Client) -> dict:
+        worksheet = get_worksheet(client, 'Meta')
+        records = worksheet.get_all_records()
+        result_ = dict()
+        for item in records:
+            if 'Class' in item.keys():
+                class_name = item.get('Class')
+                del item['Class']
+                result_[class_name] = item
+        return result_
+
+    metadata_ = get_metadata_from_sheet(client)
+    logger.info(f"loaded metadata into {config.CLASS_METADATA_PATH}")
+    with open(config.CLASS_METADATA_PATH, 'w') as f:
+        json.dump(metadata_, f)
+    
+    
 if __name__ == "__main__":
     pass

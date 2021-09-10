@@ -20,6 +20,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from typing import Union
 import datetime as dt
 
+logger = logging.getLogger('teams-joiner')
 
 def get_day() -> int:
     """returns row number in csv"""
@@ -74,12 +75,12 @@ def get_time_to_wait(class_time: str) -> int:
 
 
 def test_module_function():
-    logger = config.logger
+    # logger = config.logger
     logger.info("Logged from inside module")
 
 
 def login(browser: WebDriver):
-    logger = config.logger
+    # logger = config.logger
     username = os.environ.get("TEAMS_USERNAME")
     password = os.environ.get("TEAMS_PASSWORD")
 
@@ -153,7 +154,7 @@ def start_browser() -> WebDriver:
 
 
 def fetch_teams_homepage(browser: WebDriver) -> None:
-    logger = config.logger
+    # logger = config.logger
     browser.get("https://teams.microsoft.com")
     try:
         WebDriverWait(browser, config.DELAY).until(
@@ -169,7 +170,7 @@ def fetch_teams_homepage(browser: WebDriver) -> None:
 
 def open_grid_view(browser: WebDriver):
     """open grid view mode on teams main page"""
-    logger = config.logger
+    # logger = config.logger
     try:
         optionsButton = browser.find_element_by_css_selector("svg.app-svg.icons-settings")
         optionsButton.click()
@@ -208,7 +209,7 @@ def turn_off_camera(browser: WebDriver) -> None:
 
 
 def turn_off_mic(browser: WebDriver) -> None:
-    logger = config.logger
+    # logger = config.logger
     try:
         mic = browser.find_element_by_css_selector('span[title="Mute microphone"]')
         mic.click()
