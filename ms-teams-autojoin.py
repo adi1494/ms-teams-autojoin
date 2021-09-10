@@ -220,7 +220,7 @@ def driver_function():
     for team_name, class_time in classes_today.items():
         if team_name != "0":
             logger.info(f"waiting for {team_name} class at {class_time}")
-
+            ttw = get_time_to_wait(class_time)
             # calculate class_time to wait
             if ttw == 0 and get_time_difference(class_time) > config.ONE_HOUR:
                 logger.info(f"{team_name} class is over")
