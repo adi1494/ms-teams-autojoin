@@ -19,6 +19,7 @@ from tinydb.table import Document
 import config
 from modules import util
 
+
 from modules.db_ops import (
     Class_,
     refresh_db,
@@ -35,7 +36,7 @@ from modules.util import (
 def leave_meeting(team_name: str, class_time: str) -> None:
     # logger.info("sleeping for 30 mins")
     # time.sleep(config.HALF_HOUR)
-    
+
     logger.info("sleeping for 10 secs")
     time.sleep(10)
 
@@ -147,7 +148,7 @@ def join_class(team_name: str, class_time: str) -> None:
         )
         wait_for_team(team_name)
         meeting_button_status = join_meeting()
-
+        
     except TimeoutException:
         logger.critical(f"Could not join {team_name} class due to Timeout Error")
 
@@ -221,9 +222,6 @@ def driver_function():
             logger.info(f"waiting for {team_name} class at {class_time}")
 
             # calculate class_time to wait
-            ttw = get_time_to_wait(class_time) + 10
-
-            # 10 sec extra just to be sure :3
             if ttw == 0 and get_time_difference(class_time) > config.ONE_HOUR:
                 logger.info(f"{team_name} class is over")
 
